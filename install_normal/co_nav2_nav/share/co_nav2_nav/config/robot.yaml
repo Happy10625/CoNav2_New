@@ -1,0 +1,31 @@
+fastlio_odom_adapter:
+  ros__parameters:
+    input_odom_topic: /Odometry
+    output_odom_topic: /fastlio/odom
+    odom_frame: odom
+    base_frame: base_link
+    publish_tf: true
+
+semantic_explorer:
+  ros__parameters:
+    map_topic: /map
+    global_frame: map
+    base_frame: base_link
+    navigate_action: /navigate_to_pose
+    target_object: chair
+    detection_confidence: 0.65
+    confirm_frames: 3
+    confirmation_radius: 0.35
+    standoff_distance: 0.8
+    exploration_timeout: 120.0
+    goal_reached_distance: 0.35
+    min_frontier_cells: 8
+    frontier_replan_period: 3.0
+    enable_perception: false  # Set true only after the RGB-D camera TF is calibrated.
+    rgb_topic: /camera/color/image_raw
+    depth_topic: /camera/aligned_depth_to_color/image_raw
+    camera_info_topic: /camera/color/camera_info
+    camera_frame: camera_color_optical_frame
+    min_valid_depth_pixels: 30
+    max_detection_depth: 4.0
+    model_device: cuda:0

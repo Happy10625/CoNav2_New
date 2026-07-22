@@ -1,0 +1,14 @@
+Metadata-Version: 2.4
+Name: co_nav2_nav
+Version: 0.1.0
+Summary: FAST_LIO to Nav2 semantic frontier exploration integration
+Maintainer: robot
+Maintainer-email: robot@example.com
+License: MIT
+Requires-Dist: setuptools
+Requires-Dist: numpy
+Dynamic: license
+Dynamic: maintainer
+Dynamic: maintainer-email
+Dynamic: requires-dist
+Dynamic: summary

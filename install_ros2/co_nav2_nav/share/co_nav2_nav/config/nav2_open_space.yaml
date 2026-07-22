@@ -1,0 +1,62 @@
+# Deliberately limited profile for supervised tests in an empty area.
+# Point-cloud obstacle layers are disabled; do not use this profile around people,
+# walls, furniture other than the target, stairs, or drop-offs.
+global_costmap:
+  global_costmap:
+    ros__parameters:
+      global_frame: map
+      robot_base_frame: base_link
+      resolution: 0.05
+      footprint: "[[0.36, 0.25], [0.36, -0.25], [-0.36, -0.25], [-0.36, 0.25]]"
+      footprint_padding: 0.03
+      plugins: ["static_layer", "inflation_layer"]
+
+local_costmap:
+  local_costmap:
+    ros__parameters:
+      global_frame: odom
+      robot_base_frame: base_link
+      rolling_window: true
+      width: 6
+      height: 6
+      resolution: 0.05
+      footprint: "[[0.36, 0.25], [0.36, -0.25], [-0.36, -0.25], [-0.36, 0.25]]"
+      footprint_padding: 0.03
+      plugins: ["inflation_layer"]
+
+controller_server:
+  ros__parameters:
+    progress_checker:
+      required_movement_radius: 0.05
+      movement_time_allowance: 15.0
+    general_goal_checker:
+      xy_goal_tolerance: 0.10
+      yaw_goal_tolerance: 0.10
+      stateful: true
+    FollowPath:
+      min_vel_x: 0.0
+      max_vel_x: 0.10
+      max_speed_xy: 0.10
+      max_vel_theta: 0.25
+      acc_lim_x: 0.20
+      acc_lim_theta: 0.40
+      decel_lim_x: -0.20
+      decel_lim_theta: -0.40
+      trans_stopped_velocity: 0.03
+
+velocity_smoother:
+  ros__parameters:
+    max_velocity: [0.10, 0.0, 0.25]
+    min_velocity: [-0.10, 0.0, -0.25]
+    max_accel: [0.20, 0.0, 0.40]
+    max_decel: [-0.20, 0.0, -0.40]
+
+behavior_server:
+  ros__parameters:
+    behavior_plugins: ["wait"]
+
+bt_navigator:
+  ros__parameters:
+    default_nav_to_pose_bt_xml: package://co_nav2_nav/behavior_trees/open_space_no_recovery.xml
+    default_nav_through_poses_bt_xml: package://co_nav2_nav/behavior_trees/open_space_through_poses_no_recovery.xml
+

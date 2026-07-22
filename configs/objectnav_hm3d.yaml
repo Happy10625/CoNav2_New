@@ -1,0 +1,72 @@
+ENVIRONMENT:
+  MAX_EPISODE_STEPS: 500
+SIMULATOR:
+  TURN_ANGLE: 30
+  TILT_ANGLE: 30
+  ACTION_SPACE_CONFIG: "v1"
+  AGENT_0:
+    SENSORS: ['RGB_SENSOR', 'DEPTH_SENSOR', 'SEMANTIC_SENSOR']
+    HEIGHT: 0.88
+    RADIUS: 0.18
+  HABITAT_SIM_V0:
+    GPU_DEVICE_ID: 0
+    ALLOW_SLIDING: True 
+  SEMANTIC_SENSOR:
+    WIDTH: 640
+    HEIGHT: 480
+    HFOV: 79
+    POSITION: [0, 0.88, 0]
+  RGB_SENSOR:
+    WIDTH: 640
+    HEIGHT: 480
+    HFOV: 79
+    POSITION: [0, 0.88, 0]
+  DEPTH_SENSOR:
+    WIDTH: 640
+    HEIGHT: 480
+    HFOV: 79
+    MIN_DEPTH: 0.5
+    MAX_DEPTH: 5.0
+    POSITION: [0, 0.88, 0]
+  SCENE_DATASET: "data/scene_datasets/hm3d_v0.2/hm3d_annotated_basis.scene_dataset_config.json"
+TASK:
+  TYPE: ObjectNav-v1
+  POSSIBLE_ACTIONS: ["STOP", "MOVE_FORWARD", "TURN_LEFT", "TURN_RIGHT", "LOOK_UP", "LOOK_DOWN"]
+  SENSORS: ['OBJECTGOAL_SENSOR', 'GPS_SENSOR', 'COMPASS_SENSOR']
+  GOAL_SENSOR_UUID: objectgoal
+  MEASUREMENTS: ['DISTANCE_TO_GOAL', 'SUCCESS', 'SPL']
+  DISTANCE_TO_GOAL:
+    DISTANCE_TO: VIEW_POINTS
+  SUCCESS:
+    SUCCESS_DISTANCE: 0.1
+
+DATASET:
+  TYPE: ObjectNav-v1
+  SPLIT: val
+  DATA_PATH:# ====================== 补全缺失的数据集配置 ======================
+DATASET:
+  TYPE: ObjectNav-v1
+  SPLIT: val
+  # 你的数据集真实路径
+  DATA_PATH: "data/datasets/objectnav/hm3d/objectnav_hm3d_v2/{split}/{split}.json.gz"
+  # 你的场景真实路径
+  SCENES_DIR: "data/scene_datasets/hm3d/minival"
+
+# ====================== 任务配置 ======================
+TASK:
+  TYPE: ObjectNav-v1
+  SUCCESS_DISTANCE: 1.0
+  GOAL_SENSOR_UUID: pointgoal_with_compass_sensor
+
+MEASUREMENTS:
+  TYPE: ObjectNav-v1
+  SUCCESS:
+    TYPE: Success
+  SPL:
+    TYPE: SPL
+  DISTANCE_TO_GOAL:
+    TYPE: DistanceToGoal
+  NUM_STEPS:
+    TYPE: NumSteps
+ "data/datasets/objectnav_hm3d_v2/{split}/{split}.json.gz"
+  SCENES_DIR: "data/scene_datasets"

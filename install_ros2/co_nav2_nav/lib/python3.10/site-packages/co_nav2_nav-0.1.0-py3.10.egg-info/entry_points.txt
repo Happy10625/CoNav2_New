@@ -1,4 +1,0 @@
-[console_scripts]
-camera_sync_configurator = co_nav2_nav.camera_sync_configurator:main
-fastlio_odom_adapter = co_nav2_nav.fastlio_odom_adapter:main
-semantic_explorer = co_nav2_nav.semantic_explorer:main

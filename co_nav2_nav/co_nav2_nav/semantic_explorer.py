@@ -8,7 +8,7 @@ import numpy as np
 import rclpy
 from geometry_msgs.msg import PoseStamped, Twist
 from message_filters import ApproximateTimeSynchronizer, Subscriber
-from nav2_msgs.action import ComputePathToPose, NavigateToPose
+from nav2_msgs.action import ComputePathToPose, NavigateToPose, Spin
 from nav_msgs.msg import OccupancyGrid
 from rclpy.action import ActionClient
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
@@ -24,8 +24,10 @@ from std_msgs.msg import String
 from tf2_ros import Buffer, TransformException, TransformListener
 from visualization_msgs.msg import Marker, MarkerArray
 
-from .navigation_algorithms import (grid_to_world, scan_yaws, select_frontier,
-                                    standoff_candidates, within_radius,
+from .navigation_algorithms import (approach_goal_radius, grid_to_world,
+                                    scan_yaws, select_frontier,
+                                    standoff_candidates,
+                                    target_within_clearance, within_radius,
                                     world_to_grid)
 
 
@@ -43,6 +45,11 @@ def yaw_quaternion(yaw):
 def quaternion_yaw(q):
     return math.atan2(2.0 * (q.w * q.z + q.x * q.y),
                       1.0 - 2.0 * (q.y * q.y + q.z * q.z))
+
+
+def normalize_angle(angle):
+    """Return the equivalent angle in [-pi, pi]."""
+    return math.atan2(math.sin(angle), math.cos(angle))
 
 
 def rotate_vector(q, vector):
@@ -64,7 +71,9 @@ class SemanticExplorer(Node):
             "map_topic": "/map", "global_frame": "map", "base_frame": "base_link",
             "navigate_action": "/navigate_to_pose", "target_object": "chair",
             "detection_confidence": 0.65, "confirm_frames": 3,
-            "confirmation_radius": 0.35, "standoff_distance": 0.8,
+            "confirmation_radius": 0.35,
+            "target_clearance": 0.50, "robot_front_extent": 0.36,
+            "approach_goal_margin": 0.05,
             "exploration_timeout": 120.0, "goal_reached_distance": 0.35,
             "min_frontier_cells": 8, "frontier_replan_period": 3.0,
             "enable_perception": False, "rgb_topic": "/camera/color/image_raw",
@@ -76,6 +85,7 @@ class SemanticExplorer(Node):
             "sam_model_path": "/home/isee-cdh/ws/Co-NavGPT2/mobile_sam.pt",
             "open_space_mode": False, "scan_first": True, "scan_steps": 8,
             "allow_frontier_after_scan": True, "approach_enabled": True,
+            "spin_time_allowance": 20.0,
             "max_travel_radius": 3.0,
             "test_timeout": 180.0, "tf_failure_timeout": 1.0,
             "target_lost_timeout": 10.0, "target_observation_attempts": 2,
@@ -84,6 +94,9 @@ class SemanticExplorer(Node):
         for name, value in defaults.items():
             self.declare_parameter(name, value)
         self.p = SimpleNamespace(**{name: self.get_parameter(name).value for name in defaults})
+        self.approach_radius = approach_goal_radius(
+            float(self.p.target_clearance), float(self.p.robot_front_extent),
+            float(self.p.approach_goal_margin))
 
         self.map_message = None
         self.grid = None
@@ -99,6 +112,7 @@ class SemanticExplorer(Node):
         self.tf_buffer = Buffer(cache_time=Duration(seconds=30.0))
         self.tf_listener = TransformListener(self.tf_buffer, self)
         self.navigator = ActionClient(self, NavigateToPose, self.p.navigate_action)
+        self.spinner = ActionClient(self, Spin, "/spin")
         self.path_planner = ActionClient(self, ComputePathToPose, "/compute_path_to_pose")
 
         self.goal_handle = None
@@ -246,11 +260,7 @@ class SemanticExplorer(Node):
             return
         if (self.state == APPROACHING and self.target_position is not None and
                 now - self.target_seen_time > float(self.p.target_lost_timeout)):
-            self.get_logger().warn("Target lost during approach; stopping and returning to search")
-            self.cancel_goal(publish_stop=True)
-            self.target_position = None
-            self.confirm_positions.clear()
-            self.set_state(SEARCHING)
+            self.fail_safe("Target lost during approach")
 
     def tick(self):
         if not self.get_parameter("enabled").value:
@@ -283,30 +293,29 @@ class SemanticExplorer(Node):
             if not bool(self.p.approach_enabled):
                 self.publish_stop()
                 return
+            current_distance = math.hypot(
+                robot[0] - self.target_position[0],
+                robot[1] - self.target_position[1])
+            if target_within_clearance(
+                    current_distance, float(self.p.target_clearance),
+                    float(self.p.robot_front_extent)):
+                self.cancel_goal(publish_stop=True)
+                self.set_state(SUCCEEDED)
+                return
             candidates = standoff_candidates(
-                self.grid, self.target_position[:2], robot,
-                (self.map_message.info.origin.position.x, self.map_message.info.origin.position.y),
-                self.map_message.info.resolution,
-                radii=(float(self.p.standoff_distance),
-                       float(self.p.standoff_distance) + 0.2,
-                       float(self.p.standoff_distance) + 0.4),
+                self.target_position[:2], robot,
+                radii=(self.approach_radius,),
             )
-            if candidates:
-                poses = [
-                    (x, y, yaw) for x, y, yaw, _ in candidates
-                    if within_radius(x, y, self.session_origin,
-                                     float(self.p.max_travel_radius))]
-            else:
-                poses = []
+            poses = [(x, y, yaw) for x, y, yaw, _ in candidates]
             if poses:
                 self.plan_then_navigate(poses, "approach")
             else:
-                self.observe_retained_target()
+                self.fail_safe("No geometric approach pose could be generated")
             return
 
         if bool(self.p.scan_first) and self.scan_index < len(self.scan_headings):
             yaw = self.scan_headings[self.scan_index]
-            self.send_goal(robot[0], robot[1], yaw, "scan")
+            self.send_spin(normalize_angle(yaw - robot_pose[2]), "scan")
             return
 
         if not bool(self.p.allow_frontier_after_scan):
@@ -347,16 +356,17 @@ class SemanticExplorer(Node):
         if self.target_position is None:
             self.set_state(SEARCHING)
             return
-        robot = self.robot_xy()
-        if robot is not None and self.target_observe_count < int(self.p.target_observation_attempts):
+        robot_pose = self.robot_pose()
+        if (robot_pose is not None and
+                self.target_observe_count < int(self.p.target_observation_attempts)):
             self.target_observe_count += 1
             yaw = math.atan2(
-                self.target_position[1] - robot[1],
-                self.target_position[0] - robot[0])
+                self.target_position[1] - robot_pose[1],
+                self.target_position[0] - robot_pose[0])
             self.set_state(TARGET_CONFIRMED)
             self.get_logger().warn(
                 "No usable standoff path yet; retaining target and turning to observe it")
-            self.send_goal(robot[0], robot[1], yaw, "observe")
+            self.send_spin(normalize_angle(yaw - robot_pose[2]), "observe")
             return
         self.get_logger().warn(
             "Target observation attempts exhausted; resuming bounded search")
@@ -376,7 +386,8 @@ class SemanticExplorer(Node):
         if not candidates:
             self.get_logger().warn(f"No unblocked {kind} candidate is available")
             if kind == "approach":
-                self.observe_retained_target()
+                self.fail_safe(
+                    "No unblocked approach candidate satisfies the target clearance")
             return
         if not self.path_planner.wait_for_server(timeout_sec=0.5):
             self.get_logger().warn("ComputePathToPose action server is not available")
@@ -398,7 +409,8 @@ class SemanticExplorer(Node):
             self.plan_kind = None
             self.get_logger().warn(f"Nav2 cannot plan to any {kind} candidate")
             if kind == "approach":
-                self.observe_retained_target()
+                self.fail_safe(
+                    "Nav2 cannot plan a path within the target clearance")
             return
         pose = self.plan_candidates.pop(0)
         self.current_plan_pose = pose
@@ -462,7 +474,7 @@ class SemanticExplorer(Node):
                 self.set_state(APPROACHING)
             else:
                 self.last_frontier_goal = pose[:2]
-            self.send_goal(*pose, kind)
+            self.send_navigation_goal(*pose, kind)
             return
         if wrapped.status == 4 and path and not path_inside_boundary:
             self.get_logger().warn("Rejecting path that leaves the configured test radius")
@@ -470,7 +482,7 @@ class SemanticExplorer(Node):
         self.plan_handle = None
         self._request_next_plan(token)
 
-    def send_goal(self, x, y, yaw, kind):
+    def send_navigation_goal(self, x, y, yaw, kind):
         if not self.navigator.wait_for_server(timeout_sec=0.5):
             self.get_logger().warn("NavigateToPose action server is not available")
             return
@@ -494,6 +506,27 @@ class SemanticExplorer(Node):
         self.publish_navigation_goal(x, y, yaw, kind)
         self.get_logger().info(f"Sending {kind} goal: ({x:.2f}, {y:.2f})")
 
+    def send_spin(self, relative_yaw, kind):
+        """Send a relative in-place rotation without creating a zero-length path."""
+        if not self.spinner.wait_for_server(timeout_sec=0.5):
+            self.fail_safe("Spin action server is not available")
+            return
+        goal = Spin.Goal()
+        goal.target_yaw = float(relative_yaw)
+        allowance = max(0.0, float(self.p.spin_time_allowance))
+        goal.time_allowance.sec = int(allowance)
+        goal.time_allowance.nanosec = int((allowance - int(allowance)) * 1e9)
+        self.goal_token += 1
+        token = self.goal_token
+        self.goal_kind = kind
+        self.goal_pose = None
+        self.goal_started = time.monotonic()
+        self.goal_pending = True
+        future = self.spinner.send_goal_async(goal)
+        future.add_done_callback(lambda done: self.on_goal_response(done, token, kind))
+        self.get_logger().info(
+            f"Sending {kind} spin: {math.degrees(relative_yaw):.1f} deg")
+
     def on_goal_response(self, future, token, kind):
         try:
             handle = future.result()
@@ -514,11 +547,8 @@ class SemanticExplorer(Node):
             self.goal_handle = None
             if self.goal_pose is not None:
                 self.blocked_goals[self.goal_key(self.goal_pose)] = time.monotonic() + 15.0
-            if bool(self.p.open_space_mode):
+            if bool(self.p.open_space_mode) or kind == "approach":
                 self.fail_safe(f"{kind} goal was rejected")
-            elif kind == "approach":
-                self.target_position = None
-                self.set_state(SEARCHING)
             return
         self.goal_handle = handle
         result = handle.get_result_async()
@@ -542,11 +572,11 @@ class SemanticExplorer(Node):
                 self.scan_index += 1
                 self.set_state(SEARCHING)
             else:
-                self.fail_safe("In-place scan goal failed")
+                self.fail_safe(f"In-place scan spin failed with status {status}")
             return
         if kind == "observe":
             if status != 4:
-                self.fail_safe("Target observation turn failed")
+                self.fail_safe(f"Target observation spin failed with status {status}")
             return
         if kind == "approach" and status == 4:  # action_msgs/GoalStatus.STATUS_SUCCEEDED
             visible_recently = (
@@ -556,19 +586,22 @@ class SemanticExplorer(Node):
                 math.hypot(robot[0] - self.target_position[0], robot[1] - self.target_position[1])
                 if robot is not None and self.target_position is not None else math.inf
             )
-            max_distance = float(self.p.standoff_distance) + 0.4 + float(self.p.goal_reached_distance)
-            if visible_recently and target_distance <= max_distance:
+            within_clearance = target_within_clearance(
+                target_distance, float(self.p.target_clearance),
+                float(self.p.robot_front_extent))
+            if visible_recently and within_clearance:
+                self.cancel_goal(publish_stop=True)
                 self.set_state(SUCCEEDED)
                 return
-            self.get_logger().warn(
-                f"Approach completed without final confirmation "
-                f"(visible={visible_recently}, target_distance={target_distance:.2f} m)")
-            self.target_position = None
+            self.fail_safe(
+                "Approach completed outside the required target clearance "
+                f"(visible={visible_recently}, base_distance={target_distance:.2f} m, "
+                f"limit={float(self.p.target_clearance) + float(self.p.robot_front_extent):.2f} m)")
+            return
         if kind == "approach" and status != 4:
             if failed_pose is not None:
                 self.blocked_goals[self.goal_key(failed_pose)] = time.monotonic() + 15.0
-            self.publish_stop()
-            self.set_state(TARGET_CONFIRMED)
+            self.fail_safe(f"Approach goal failed with status {status}")
             return
         if status != 4 and failed_pose is not None:
             self.blocked_goals[self.goal_key(failed_pose)] = time.monotonic() + 15.0

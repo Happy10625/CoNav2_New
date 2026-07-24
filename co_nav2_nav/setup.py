@@ -23,6 +23,9 @@ setup(
             "behavior_trees/open_space_no_recovery.xml",
             "behavior_trees/open_space_through_poses_no_recovery.xml",
         ]),
+        ("share/" + package_name + "/rviz", [
+            "rviz/co_nav2_validation.rviz",
+        ]),
     ],
     install_requires=["setuptools", "numpy"],
     zip_safe=True,

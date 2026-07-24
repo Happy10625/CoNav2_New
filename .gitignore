@@ -1,25 +1,43 @@
-# 原CoNav
-__pycache__
-data*
-tmp/
-test.py
-envs/
-mobile_sam.pt
-yolov8l-world.pt
-.history
-exp_*
-human.py
-.venv
+# Datasets, downloaded models, recordings, and runtime data
+/data/
+/data_backup*/
+/*.pt
+/*.pth
+/*.onnx
+/*.engine
+/*.bag
+/*.db3
+/tmp/
+/exp_*/
 
-# ROS2
-build/
-install/
-log/
-log_ros2/
+# Local Python/ROS environments and generated environment state
+/.venv/
+/venv/
+/env/
+/envs/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+/.history/
+/build/
+/build_*/
+/install/
+/install_*/
+/log/
+/log_*/
 
-# secret
+# Local environment configuration and secrets
+.env
+.env.*
 *.env
+!.env.example
 *.key
 *.pem
-
-*.log
+*.p12
+*.pfx
+credentials.json
+secrets.json
+*secret*.yaml
+*secret*.yml

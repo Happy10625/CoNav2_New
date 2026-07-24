@@ -9,6 +9,16 @@ FREE = 0
 UNKNOWN = -1
 
 
+def approach_goal_radius(target_clearance, robot_front_extent, goal_margin):
+    """Return the base-to-target radius that guarantees the requested clearance."""
+    return max(0.0, target_clearance + robot_front_extent - goal_margin)
+
+
+def target_within_clearance(base_distance, target_clearance, robot_front_extent):
+    """Return whether the robot front is within the requested target clearance."""
+    return base_distance <= target_clearance + robot_front_extent
+
+
 def within_radius(x, y, origin_xy, radius):
     """Return whether a world point stays inside a circular test boundary."""
     if origin_xy is None or radius <= 0.0:
@@ -103,33 +113,25 @@ def select_frontier(grid, robot_cell, min_cells=8):
     return best, clusters
 
 
-def cell_is_safe(grid, cell, clearance_cells):
-    x, y = cell
-    height, width = grid.shape
-    if not (0 <= x < width and 0 <= y < height) or grid[y, x] != FREE:
-        return False
-    x0, x1 = max(0, x - clearance_cells), min(width, x + clearance_cells + 1)
-    y0, y1 = max(0, y - clearance_cells), min(height, y + clearance_cells + 1)
-    return bool(np.all(grid[y0:y1, x0:x1] == FREE))
+def standoff_candidates(object_xy, robot_xy, radii=(0.8, 1.0, 1.2), samples=24):
+    """Return geometric target-facing poses, closest to the robot first.
 
-
-def standoff_candidates(grid, object_xy, robot_xy, origin, resolution,
-                        radii=(0.8, 1.0, 1.2), samples=24, clearance=0.47):
-    """Return safe poses (x, y, yaw, radius), closest to the robot first."""
+    Co-Nav2 delegates traversability to its FMM planner after inflating the
+    obstacle map.  The ROS 2 integration follows the same separation: this
+    function does not reinterpret OccupancyGrid values or reject unknown cells;
+    Nav2's planner and costmaps decide whether each pose is reachable.
+    """
     ox, oy = object_xy
     candidates = []
-    clearance_cells = int(math.ceil(clearance / resolution))
     preferred = math.atan2(robot_xy[1] - oy, robot_xy[0] - ox)
     for radius in radii:
         ring = []
         for index in range(samples):
             angle = preferred + 2.0 * math.pi * index / samples
             x, y = ox + radius * math.cos(angle), oy + radius * math.sin(angle)
-            cell = world_to_grid(x, y, origin[0], origin[1], resolution)
-            if cell_is_safe(grid, cell, clearance_cells):
-                yaw = math.atan2(oy - y, ox - x)
-                travel = math.hypot(x - robot_xy[0], y - robot_xy[1])
-                ring.append((travel, (x, y, yaw, radius)))
+            yaw = math.atan2(oy - y, ox - x)
+            travel = math.hypot(x - robot_xy[0], y - robot_xy[1])
+            ring.append((travel, (x, y, yaw, radius)))
         if ring:
             return [item[1] for item in sorted(ring)]
     return candidates

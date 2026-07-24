@@ -19,7 +19,11 @@ semantic_explorer:
     detection_confidence: 0.65
     confirm_frames: 3
     confirmation_radius: 0.35
-    standoff_distance: 0.8
+    # The goal radius is 0.50 + 0.36 - 0.05 = 0.81 m. With Nav2's
+    # 0.05 m goal tolerance, the vehicle front is at most 0.50 m away.
+    target_clearance: 0.50
+    robot_front_extent: 0.36
+    approach_goal_margin: 0.05
     exploration_timeout: 120.0
     goal_reached_distance: 0.35
     min_frontier_cells: 8
@@ -39,6 +43,9 @@ semantic_explorer:
     open_space_mode: false
     scan_first: true
     scan_steps: 8
+    # Scan/observe rotations use Nav2's dedicated Spin action. This timeout is
+    # independent of the controller's translation progress checker.
+    spin_time_allowance: 20.0
     allow_frontier_after_scan: true
     approach_enabled: true
     max_travel_radius: 3.0

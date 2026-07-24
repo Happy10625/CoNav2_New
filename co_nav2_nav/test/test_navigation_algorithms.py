@@ -1,7 +1,9 @@
 import numpy as np
 
-from co_nav2_nav.navigation_algorithms import (scan_yaws, select_frontier,
+from co_nav2_nav.navigation_algorithms import (approach_goal_radius, scan_yaws,
+                                               select_frontier,
                                                standoff_candidates,
+                                               target_within_clearance,
                                                within_radius)
 
 
@@ -16,16 +18,32 @@ def test_frontier_is_reachable_and_adjacent_to_unknown():
     assert len(clusters) > 0
 
 
-def test_standoff_avoids_occupied_cells():
-    grid = np.zeros((100, 100), dtype=np.int16)
-    grid[48:53, 48:53] = 100
+def test_standoff_candidates_are_geometric_and_planner_independent():
     candidates = standoff_candidates(
-        grid, object_xy=(5.0, 5.0), robot_xy=(3.0, 5.0),
-        origin=(0.0, 0.0), resolution=0.1, radii=(1.0,), clearance=0.2)
+        object_xy=(5.0, 5.0), robot_xy=(3.0, 5.0), radii=(1.0,))
     assert candidates
     x, y, yaw, radius = candidates[0]
     assert abs(np.hypot(x - 5.0, y - 5.0) - radius) < 1e-6
     assert abs(yaw - np.arctan2(5.0 - y, 5.0 - x)) < 1e-6
+
+
+def test_approach_goal_radius_guarantees_half_metre_front_clearance():
+    radius = approach_goal_radius(0.50, 0.36, 0.05)
+    assert np.isclose(radius, 0.81)
+    assert target_within_clearance(radius + 0.05, 0.50, 0.36)
+    assert not target_within_clearance(radius + 0.051, 0.50, 0.36)
+
+
+def test_approach_candidates_use_only_the_required_radius_and_face_target():
+    radius = approach_goal_radius(0.50, 0.36, 0.05)
+    candidates = standoff_candidates(
+        object_xy=(10.0, 10.0), robot_xy=(8.0, 10.0),
+        radii=(radius,))
+    assert candidates
+    for x, y, yaw, candidate_radius in candidates:
+        assert np.isclose(candidate_radius, 0.81)
+        assert np.isclose(np.hypot(x - 10.0, y - 10.0), 0.81)
+        assert np.isclose(yaw, np.arctan2(10.0 - y, 10.0 - x))
 
 
 def test_scan_yaws_cover_one_turn_in_equal_steps():

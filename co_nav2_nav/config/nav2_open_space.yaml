@@ -1,6 +1,6 @@
-# Deliberately limited profile for supervised tests in an empty area.
-# Point-cloud obstacle layers are disabled; do not use this profile around people,
-# walls, furniture other than the target, stairs, or drop-offs.
+# Deliberately limited profile for supervised tests in a controlled area.
+# Livox obstacle layers are enabled for the target-approach phase. They do not
+# detect drop-offs, so stairs and ledges must still be physically excluded.
 global_costmap:
   global_costmap:
     ros__parameters:
@@ -9,7 +9,22 @@ global_costmap:
       resolution: 0.05
       footprint: "[[0.36, 0.25], [0.36, -0.25], [-0.36, -0.25], [-0.36, 0.25]]"
       footprint_padding: 0.03
-      plugins: ["static_layer", "inflation_layer"]
+      plugins: ["static_layer", "obstacle_layer", "inflation_layer"]
+      obstacle_layer:
+        plugin: "nav2_costmap_2d::ObstacleLayer"
+        observation_sources: fastlio_cloud
+        fastlio_cloud:
+          topic: /cloud_registered_body
+          sensor_frame: livox_frame
+          data_type: PointCloud2
+          marking: true
+          clearing: true
+          raytrace_min_range: 0.20
+          raytrace_max_range: 8.0
+          obstacle_min_range: 0.20
+          obstacle_max_range: 7.5
+          min_obstacle_height: 0.05
+          max_obstacle_height: 1.50
 
 local_costmap:
   local_costmap:
@@ -22,7 +37,22 @@ local_costmap:
       resolution: 0.05
       footprint: "[[0.36, 0.25], [0.36, -0.25], [-0.36, -0.25], [-0.36, 0.25]]"
       footprint_padding: 0.03
-      plugins: ["inflation_layer"]
+      plugins: ["voxel_layer", "inflation_layer"]
+      voxel_layer:
+        plugin: "nav2_costmap_2d::VoxelLayer"
+        observation_sources: fastlio_cloud
+        fastlio_cloud:
+          topic: /cloud_registered_body
+          sensor_frame: livox_frame
+          data_type: PointCloud2
+          marking: true
+          clearing: true
+          raytrace_min_range: 0.20
+          raytrace_max_range: 8.0
+          obstacle_min_range: 0.20
+          obstacle_max_range: 7.5
+          min_obstacle_height: 0.05
+          max_obstacle_height: 1.50
 
 controller_server:
   ros__parameters:
@@ -30,7 +60,7 @@ controller_server:
       required_movement_radius: 0.05
       movement_time_allowance: 15.0
     general_goal_checker:
-      xy_goal_tolerance: 0.10
+      xy_goal_tolerance: 0.05
       yaw_goal_tolerance: 0.10
       stateful: true
     FollowPath:
@@ -53,10 +83,18 @@ velocity_smoother:
 
 behavior_server:
   ros__parameters:
-    behavior_plugins: ["wait"]
+    # Spin is invoked explicitly for camera scans and target observation. It is
+    # not added to the no-recovery behavior tree, so Nav2 cannot start an
+    # unsolicited recovery rotation.
+    behavior_plugins: ["spin", "wait"]
+    spin:
+      plugin: "nav2_behaviors/Spin"
+    max_rotational_vel: 0.25
+    min_rotational_vel: 0.10
+    rotational_acc_lim: 0.40
+    simulate_ahead_time: 2.0
 
 bt_navigator:
   ros__parameters:
     default_nav_to_pose_bt_xml: package://co_nav2_nav/behavior_trees/open_space_no_recovery.xml
     default_nav_through_poses_bt_xml: package://co_nav2_nav/behavior_trees/open_space_through_poses_no_recovery.xml
-
